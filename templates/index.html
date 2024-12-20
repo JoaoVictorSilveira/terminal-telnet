@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telnet Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            color: #333;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: auto;
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        h1, h2 {
+            margin-bottom: 20px;
+            color: #007bff;
+            text-align: center;
+        }
+
+        form {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input[type="text"], input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        button {
+            display: inline-block;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px 0;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        pre {
+            background: #f9f9f9;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            overflow-x: auto;
+            max-height: 300px;
+        }
+
+        .btn-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 15px;
+            }
+
+            button {
+                width: 100%;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Telnet Interface</h1>
+        <form id="loginForm">
+            <label for="hostname">Hostname/IP:</label>
+            <input type="text" id="hostname" name="hostname" required>
+            <label for="port">Port:</label>
+            <input type="number" id="port" name="port" required>
+            <button type="submit">Conectar</button>
+        </form>
+
+        <h2>Preencha os campos abaixo</h2>
+        <label for="var1">Pon:</label>
+        <input type="text" id="var1" name="var1">
+        <label for="var2">ID:</label>
+        <input type="text" id="var2" name="var2">
+        
+        <div class="btn-group">
+            <button type="button" onclick="executeCommand('login')">Login</button>
+            <button type="button" onclick="executeCommand('get_id')">ONU/ONT ID</button>
+            <button type="button" onclick="executeCommand('autoriza_ont')">Authorize ONT</button>
+            <button type="button" onclick="executeCommand('autoriza_onu')">Authorize ONU</button>
+            <button type="button" onclick="executeCommand('delete_onu')">Delete ONU/ONT</button>
+        </div>
+        
+        <h2>Saída do comando</h2>
+        <pre id="output"></pre>
+
+        <div class="btn-group">
+            <button onclick="logout()">Logout</button>
+            <button onclick="refreshOutput()">Atualizar Saída do comando</button>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').onsubmit = async function(event) {
+            event.preventDefault();
+            let response = await fetch('/login', {
+                method: 'POST',
+                body: new FormData(event.target)
+            });
+            let result = await response.json();
+            alert(result.message || result.error);
+        };
+
+        async function executeCommand(commandSet) {
+            const var1 = document.getElementById('var1').value;
+            const var2 = document.getElementById('var2').value;
+
+            const commandsRequiringVar2 = ['autoriza_ont', 'autoriza_onu', 'delete_onu'];
+            if (!var1) {
+                alert('Por favor, preencha a variável 1.');
+                return;
+            }
+            if (commandsRequiringVar2.includes(commandSet) && !var2) {
+                alert('Por favor, preencha a variável 2.');
+                return;
+            }
+
+            let response = await fetch('/execute_predefined', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ command_set: commandSet, var1: var1, var2: var2 })
+            });
+
+            let result = await response.json();
+            document.getElementById('output').textContent = result.output || result.error;
+        }
+
+        async function logout() {
+            let response = await fetch('/logout', { method: 'POST' });
+            let result = await response.json();
+            alert(result.message || result.error);
+            document.getElementById('output').textContent = "";  
+        }
+
+        async function refreshOutput() {
+            let response = await fetch('/refresh_output', { method: 'GET' });
+            let result = await response.json();
+            document.getElementById('output').textContent = result.output || result.error;
+        }
+    </script>
+</body>
+</html>
