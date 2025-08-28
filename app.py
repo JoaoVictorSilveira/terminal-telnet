@@ -1,118 +1,82 @@
-from flask import Flask, request, render_template, jsonify, session
-import socket
+from flask import Flask, request, jsonify, session, render_template
+import telnetlib
+import threading
 import time
+import uuid
 
 app = Flask(__name__)
-app.secret_key = 'sua-chave-secreta'
+app.secret_key = "sua-chave-secreta"
 
-# Dicionários para armazenar conexões Telnet e últimas respostas
+# Sessões Telnet
 telnet_sessions = {}
-last_responses = {}
+last_output = {}
 
-# Credenciais fixas para Telnet
-TELNET_USERNAME = 'usuario'  # Coloque o nome de usuário fixo aqui
-TELNET_PASSWORD = 'senha'    # Coloque a senha fixa aqui
+def read_telnet_output(tn, telnet_id):
+    while True:
+        try:
+            data = tn.read_very_eager().decode(errors="ignore")
+            if data:
+                last_output[telnet_id] += data
+            time.sleep(0.2)
+        except EOFError:
+            break
+        except Exception:
+            break
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
-@app.route('/login', methods=['POST'])
-def login_telnet():
+@app.route('/connect_telnet', methods=['POST'])
+def connect_telnet():
+    data = request.get_json()
+    ip = data.get("ip")
+    port = int(data.get("port"))
+
+    telnet_id = str(uuid.uuid4())
     try:
-        # Recebendo os dados do formulário
-        hostname = request.form['hostname']
-        port = int(request.form['port'])
+        tn = telnetlib.Telnet(ip, port, timeout=5)
+        telnet_sessions[telnet_id] = tn
+        last_output[telnet_id] = ""
+        session['telnet_id'] = telnet_id
 
-        # Configurando o socket Telnet
-        telnet_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        telnet_socket.connect((hostname, port))
-
-        # Realizando login com credenciais fixas
-        telnet_socket.recv(1024)  # Aguarda mensagem inicial
-        telnet_socket.sendall(f"{TELNET_USERNAME}\n".encode('ascii'))
-        telnet_socket.recv(1024)  # Aguarda pedido de senha
-        telnet_socket.sendall(f"{TELNET_PASSWORD}\n".encode('ascii'))
-
-        # Salvando a conexão na sessão do Flask
-        session_id = f"{hostname}:{port}"
-        telnet_sessions[session_id] = telnet_socket
-        last_responses[session_id] = ""  # Inicializa com saída vazia
-        session['session_id'] = session_id
-
-        return jsonify({"message": "Login realizado com sucesso.", "error": ""})
+        threading.Thread(target=read_telnet_output, args=(tn, telnet_id), daemon=True).start()
+        return jsonify({"message": f"Conectado ao Telnet {ip}:{port}"})
     except Exception as e:
-        return jsonify({"error": str(e)})
+        return jsonify({"message": f"Erro ao conectar: {e}"})
 
-@app.route('/execute_predefined', methods=['POST'])
-def execute_predefined_commands():
-    try:
-        session_id = session.get('session_id')
-        if not session_id or session_id not in telnet_sessions:
-            return jsonify({"error": "Nenhuma sessão ativa. Faça login novamente."})
+@app.route('/disconnect_telnet', methods=['POST'])
+def disconnect_telnet():
+    telnet_id = session.get('telnet_id')
+    if telnet_id and telnet_id in telnet_sessions:
+        try:
+            tn = telnet_sessions[telnet_id]
+            tn.close()
+        except:
+            pass
+        del telnet_sessions[telnet_id]
+        del last_output[telnet_id]
 
-        telnet_socket = telnet_sessions[session_id]
-        var1 = request.json.get('var1', '')
-        var2 = request.json.get('var2', '')
-        command_set = request.json.get('command_set')
+    session.pop('telnet_id', None)
+    return jsonify({"message": "Telnet desconectado com sucesso!"})
 
-        command_sets = {
-            "login": ["intelbras", "intelbras"],
-            "get_id": [f"onu inventory 1/{var1}", "yes"],
-            "autoriza_ont": [f"onu set 1-1-{var1}-{var2} meprof intelbras-142ng",
-                             f"bridge add 1-1-{var1}-{var2}/gpononu downlink vlan 110{var1} tagged rg"],
-            "autoriza_onu": [f"onu set 1-1-{var1}-{var2} meprof intelbras-110g",
-                             f"bridge add 1-1-{var1}-{var2}/gpononu downlink vlan 110{var1} tagged rg"],
-            "delete_onu": [f"onu delete 1-1-{var1}-{var2}", "yes", "no", "yes"]
-        }
+@app.route('/send_command', methods=['POST'])
+def send_command():
+    telnet_id = session.get('telnet_id')
+    if telnet_id not in telnet_sessions:
+        return jsonify({"message": "Nenhuma sessão ativa."})
 
-        commands = command_sets.get(command_set)
-        if not commands:
-            return jsonify({"error": "Conjunto de comandos inválido."})
+    tn = telnet_sessions[telnet_id]
+    command = request.json.get("command")
+    tn.write(command.encode("utf-8") + b"\n")
+    return jsonify({"message": f"Comando enviado: {command}"})
 
-        # Substituir var2 somente se o comando necessitar dela
-        output = ""
-        for command in commands:
-            command = command.replace("{var1}", var1)
-            if "{var2}" in command:
-                if not var2:
-                    return jsonify({"error": "Variável 2 é obrigatória para este comando."})
-                command = command.replace("{var2}", var2)
+@app.route('/get_output')
+def get_output():
+    telnet_id = session.get('telnet_id')
+    if not telnet_id or telnet_id not in last_output:
+        return jsonify({"output": ""})
+    return jsonify({"output": last_output[telnet_id]})
 
-            telnet_socket.sendall(f"{command}\n".encode('ascii'))
-            time.sleep(1)
-            response = telnet_socket.recv(4096).decode('ascii')
-            output += f"\n{response.strip()}"
-
-        last_responses[session_id] = output
-        return jsonify({"output": output.strip()})
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-@app.route('/logout', methods=['POST'])
-def logout_telnet():
-    try:
-        session_id = session.get('session_id')
-        if session_id and session_id in telnet_sessions:
-            telnet_sessions[session_id].close()
-            del telnet_sessions[session_id]
-            del last_responses[session_id]
-
-        session.pop('session_id', None)
-        return jsonify({"message": "Logout realizado com sucesso."})
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-@app.route('/refresh_output', methods=['GET'])
-def refresh_output():
-    try:
-        session_id = session.get('session_id')
-        if not session_id or session_id not in last_responses:
-            return jsonify({"error": "Nenhuma saída disponível. Execute um comando."})
-
-        return jsonify({"output": last_responses[session_id], "error": ""})
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)
