@@ -5,7 +5,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Copiar requirements (se tiver) e app.py
-COPY app.py /app/
+COPY . /app/
 
 # Instalar dependências
 RUN pip install --no-cache-dir flask
@@ -15,3 +15,4 @@ EXPOSE 5000
 
 # Comando para rodar o Flask
 CMD ["python", "app.py"]
+
