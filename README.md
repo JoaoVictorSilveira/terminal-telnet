@@ -1,10 +1,12 @@
 ## Estrutura do Projeto
 
-'''/app
+'''
+/app
 ├─ app.py
 ├─ templates/
 │ └─ index.html
-└─ Dockerfile'''
+└─ Dockerfile
+'''
 
 ## Rodar Container
 docker run -d -p 5000:5000 --name console-telnet console-telnet
